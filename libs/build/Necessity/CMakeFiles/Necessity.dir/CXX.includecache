@@ -1,0 +1,40 @@
+#IncludeRegexLine: ^[ 	]*#[ 	]*(include|import)[ 	]*[<"]([^">]+)([">])
+
+#IncludeRegexScan: ^.*$
+
+#IncludeRegexComplain: ^$
+
+#IncludeRegexTransform: 
+
+../Necessity/Cost.h
+DataStruct.h
+-
+
+../Necessity/DataStruct.h
+vector
+-
+string
+-
+iostream
+-
+fstream
+-
+exception
+-
+
+../Necessity/OptDataComputation.h
+DataStruct.h
+../Necessity/DataStruct.h
+
+/home/haoquan/Documents/DLSimulationCostModel/libs/Necessity/Cost.cpp
+Cost.h
+-
+OptDataComputation.h
+-
+cmath
+-
+numeric
+-
+algorithm
+-
+

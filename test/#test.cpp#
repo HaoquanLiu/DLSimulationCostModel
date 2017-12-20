@@ -1,0 +1,197 @@
+#include <DataStruct.h>
+#include <DataOperation.h>
+#include <OptDataComputation.h>
+#include <GeomDigging.h>
+#include <GeomDumping.h>
+#include <IO.h>
+#include <Cost.h>
+#include <sys/time.h>
+#include <algorithm>
+#include <libconfig.h++>
+
+using namespace libconfig;
+using namespace std;
+
+typedef unsigned long long timestamp_t;
+
+static timestamp_t get_timestamp ()
+{
+  struct timeval now;
+  gettimeofday (&now, NULL);
+  return  now.tv_usec + (timestamp_t)now.tv_sec * 1000000;
+}
+
+int main(int argc, char **argv)
+{
+  //-------------Read command line arguments
+  string config_arg;
+  if(argc < 2)
+    {
+      cout << "Please provide config file." << endl;
+sdlkfj      exit(1);
+    }
+  else if(argc >= 3)
+    {
+      cout << "Redundent input arguments detected." << endl;
+      exit(1);
+    }
+  else
+    config_arg = argv[1];
+
+  //--------------Read config file
+  Config cfg;
+  // Read the file. If there is an error, report it and exit.
+  try
+  {
+    const char *config_path = config_arg.c_str();
+    cfg.readFile(config_path);
+  }
+  catch(const FileIOException &fioex)
+  {
+    std::cerr << "I/O error while reading file." << std::endl;
+    return(EXIT_FAILURE);
+  }
+  catch(const ParseException &pex)
+  {
+    std::cerr << "Parse error at " << pex.getFile() << ":" << pex.getLine()
+              << " - " << pex.getError() << std::endl;
+    return(EXIT_FAILURE);
+  }
+
+  string ini_point_cloud_path;
+  string target_point_cloud_path;
+  string downsampled_point_cloud_path;
+  string dg_polygon_path;
+  string dp_polygon_path;
+  string dl_polygon_path;
+  double ini_point_cloud_cell_size;
+  double target_point_cloud_cell_size;
+  double downsampled_point_cloud_cell_size;
+
+  double r; // operating radius
+  double r_f; // fairlead radius
+  double h_f; // fairlead height
+  double mdr; // minimum disengaging radius
+  double V_ca; // bucket capacity
+  double alpha_b; // boom angle (unit in rad)
+  double w_buc; // dragline bucket width
+  double max_dumping_height;
+  double max_swing_speed; // degrees per second
+  double max_hoist_speed; // metres per second
+  double max_swing_accel; // degrees per second square
+  double max_hoist_accel; // metres per second square
+  double walking_speed; // metres per minute
+
+  double swell_factor;
+  double angle_of_repose;
+  double spoil_toe_start_point_x;
+  double spoil_toe_start_point_y;
+  double spoil_toe_end_point_x;
+  double spoil_toe_end_point_y;
+
+  double coal_height;
+
+  string test_dl_seq_path;
+
+  if(cfg.lookupValue("initial_terrain_path",ini_point_cloud_path) && cfg.lookupValue("target_terrain_path",target_point_cloud_path) &&
+     cfg.lookupValue("downsampled_terrain_path",downsampled_point_cloud_path) && cfg.lookupValue("dg_polygon_path",dg_polygon_path) &&
+     cfg.lookupValue("dp_polygon_path",dp_polygon_path) && cfg.lookupValue("dl_polygon_path",dl_polygon_path) &&
+     cfg.lookupValue("initial_terrain_cell_size",ini_point_cloud_cell_size) && cfg.lookupValue("target_terrain_cell_size",target_point_cloud_cell_size) &&
+     cfg.lookupValue("downsampled_terrain_cell_size",downsampled_point_cloud_cell_size) && cfg.lookupValue("r",r) &&
+     cfg.lookupValue("r_f", r_f) && cfg.lookupValue("h_f", h_f) &&
+     cfg.lookupValue("mdr", mdr) && cfg.lookupValue("V_ca", V_ca) &&
+     cfg.lookupValue("alpha_b", alpha_b) && cfg.lookupValue("w_buc", w_buc) &&
+     cfg.lookupValue("max_dumping_height", max_dumping_height) && cfg.lookupValue("max_swing_speed", max_swing_speed) &&
+     cfg.lookupValue("max_hoist_speed", max_hoist_speed) && cfg.lookupValue("max_swing_accel", max_swing_accel) &&
+     cfg.lookupValue("max_hoist_accel", max_hoist_accel) && cfg.lookupValue("walking_speed", walking_speed) &&
+     cfg.lookupValue("swell_factor", swell_factor) && cfg.lookupValue("angle_of_repose", angle_of_repose) &&
+     cfg.lookupValue("spoil_toe_start_point_x", spoil_toe_start_point_x) && cfg.lookupValue("spoil_toe_start_point_y", spoil_toe_start_point_y) &&
+     cfg.lookupValue("spoil_toe_end_point_x", spoil_toe_end_point_x) && cfg.lookupValue("spoil_toe_end_point_y", spoil_toe_end_point_y) &&
+     cfg.lookupValue("coal_height",coal_height) && cfg.lookupValue("test_dl_seq_path", test_dl_seq_path))
+    {}
+  else
+    {
+      cout << "Not enough values found in the config file." << endl;
+      exit(0);
+    }
+
+  //---------- load terrain data
+  point_cloud ini_point_cloud(ini_point_cloud_path,ini_point_cloud_cell_size,ini_point_cloud_cell_size);
+  point_cloud target_point_cloud(target_point_cloud_path,target_point_cloud_cell_size,target_point_cloud_cell_size);
+  point_cloud downsampled_point_cloud(downsampled_point_cloud_path,downsampled_point_cloud_cell_size,downsampled_point_cloud_cell_size);
+  vector<vector<double> > dg_polygon = ReadCSV(dg_polygon_path);
+  vector<vector<double> > dl_polygon = ReadCSV(dl_polygon_path);
+  vector<vector<double> > dp_polygon = ReadCSV(dp_polygon_path);
+
+  //------------dragline and strip parameters
+  dl_para dragline_para(r, r_f, h_f, mdr, V_ca, alpha_b, w_buc, max_dumping_height, max_swing_speed, max_hoist_speed, max_swing_accel, max_hoist_accel, walking_speed); // 3ns27
+  blk_para block_para(swell_factor, angle_of_repose, spoil_toe_start_point_x, spoil_toe_start_point_y, spoil_toe_end_point_x, spoil_toe_end_point_y); // 3ns27
+
+  //------------extract the terrain in the specified digging, dumping and working areas
+  point_cloud dg_elements_ini = ini_point_cloud.ExtractPointCloud(dg_polygon);
+  point_cloud dg_elements_target = target_point_cloud.ExtractPointCloud(dg_polygon);
+  point_cloud dl_candidate_pos = downsampled_point_cloud.ExtractPointCloud(dl_polygon);
+  point_cloud dp_elements_ini = ini_point_cloud.ExtractPointCloud(dp_polygon);
+
+  cout << "The number of digging elements is " << dg_elements_ini.NumberOfPoints() << endl;
+  cout << "The number of dumping elements is " << dp_elements_ini.NumberOfPoints() << endl;
+  cout << "The number of candidate dragline position is " << dl_candidate_pos.NumberOfPoints() << endl;
+
+  // dl_candidate_pos.WriteToXYZ("/tmp/dl_candidate_pos.xyz");
+  // dg_elements_ini.WriteToXYZ("/tmp/dg_elements_ini.xyz");
+  // dg_elements_target.WriteToXYZ("/tmp/dg_elements_target.xyz");
+
+  //-----------read the dragline positioning sequences
+  vector<vector<unsigned int> > dl_seqs = ReadCSVTemp(test_dl_seq_path);
+
+  //-----------some useful variables
+  vector<double> h_target = dg_elements_target.ZCoordinates();  
+  vector<unsigned int> indices_coal = IndicesCoal(h_target,coal_height);
+  vector<double> h_ini = dg_elements_ini.ZCoordinates();
+  double expose_ratio_ini = ExposeRatio(h_ini,h_target,indices_coal);
+
+  //-----------pre-compute the optimization data needed
+  optdata optdata_all = ComputeOptData(ini_point_cloud,dl_candidate_pos,dg_elements_ini,dg_elements_target,dp_elements_ini,dragline_para,block_para);
+
+  //-----------simulation and cost computation
+  ofstream ofs_op_time("/tmp/op_time.txt");
+  timestamp_t t0 = get_timestamp();
+  for(unsigned int iter = 0; iter < 20; iter++)
+    {
+      sol_digging_dumping sol = GeomMaxDiggingWithSpoil(dl_seqs[iter],optdata_all,dg_elements_ini,dg_elements_target,dp_elements_ini,dl_candidate_pos,dragline_para,block_para);
+      cost_sol cost_online = Cost(sol,dl_seqs[iter],optdata_all,dl_candidate_pos,dg_elements_ini,dg_elements_target,dp_elements_ini,dragline_para,block_para);
+      //cout << "Total operation time of the positioning sequence is " << cost_online.tot_op_time << "s" << endl;
+      ofs_op_time << cost_online.tot_op_time << endl;
+  
+      point_cloud tmp_dg_elements_ini(dg_elements_ini);
+      point_cloud tmp_ug(dg_elements_ini);
+      point_cloud tmp_dp_elements_ini(dp_elements_ini);
+
+      for(unsigned int i = 0; i < dl_seqs[iter].size(); i++)
+      	{
+      	  tmp_dg_elements_ini.ApplyDiggingActionsInPlace(sol.ug_seq[i]);
+      	  tmp_dp_elements_ini.ApplyDumpingActionsInPlace(sol.up_seq[i]);
+      	  // string fname_dg = string("/tmp/dg_elements_result") + string("_") + to_string(i+1) + string(".xyz");
+      	  // string fname_dp = string("/tmp/dp_elements_result") + string("_") + to_string(i+1) + string(".xyz");
+      	  // tmp_dg_elements_ini.WriteToXYZ(fname_dg);
+      	  // tmp_dp_elements_ini.WriteToXYZ(fname_dp);
+	}
+
+      // ini_point_cloud.UpdateRegion(tmp_dg_elements_ini);
+      // ini_point_cloud.UpdateRegion(tmp_dp_elements_ini);
+      // ini_point_cloud.WriteToXYZ("/tmp/test.xyz");
+
+      // vector<double> h_final = tmp_dg_elements_ini.ZCoordinates();
+      // double expose_ratio = ExposeRatio(h_final,h_target,indices_coal);
+      // cout << expose_ratio_ini * 100 << "% of coal is exposed initially." << endl;
+      // cout << expose_ratio * 100 << "% of coal is exposed at the end." << endl;
+    }
+  ofs_op_time.close();
+
+  timestamp_t t1 = get_timestamp();
+  cout << "Elapsed time is " << (t1 - t0) / 1000000.0L << " seconds." << endl;
+  cout << "Done." << endl;
+
+
+  return 0;
+}

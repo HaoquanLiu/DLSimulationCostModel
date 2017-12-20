@@ -1,0 +1,1 @@
+/usr/bin/c++  -fPIC  -fopenmp -Wall -std=c++11   -shared -Wl,-soname,libGeom.so -o ../libGeom.so CMakeFiles/Geom.dir/GeomDigging.cpp.o CMakeFiles/Geom.dir/GeomDumping.cpp.o  -L/home/haoquan/Documents/DLSimulationCostModel/libs/build -lNecessity -Wl,-rpath,/home/haoquan/Documents/DLSimulationCostModel/libs/build 

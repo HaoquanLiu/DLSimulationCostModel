@@ -1,0 +1,35 @@
+initial_terrain_path = "/home/haoquan/Documents/DLSimulationCostModel/data/3ns27_initialTerrain_2x2_keyRemoved.xyz";
+initial_terrain_cell_size = 2.0;
+target_terrain_path = "/home/haoquan/Documents/DLSimulationCostModel/data/3ns27_designProfile_2x2.xyz";
+target_terrain_cell_size = 2.0;
+downsampled_terrain_path = "/home/haoquan/Documents/DLSimulationCostModel/data/3ns27_initialTerrain_5x5_keyRemoved.xyz";
+downsampled_terrain_cell_size = 5.0;
+
+dg_polygon_path = "/home/haoquan/Documents/DLSimulationCostModel/config/dg_polygon_3ns27_blk1.csv";
+dp_polygon_path = "/home/haoquan/Documents/DLSimulationCostModel/config/dp_polygon_3ns27.csv";
+dl_polygon_path = "/home/haoquan/Documents/DLSimulationCostModel/config/dl_polygon_3ns27_blk1.csv";
+
+r = 88.39; 
+r_f = 12.24;
+h_f = 8.81;
+mdr = 18.0;
+V_ca = 50.0;
+alpha_b = 21.0;
+w_buc = 4.0;
+max_dumping_height = 42.67;
+max_swing_speed = 8.95;
+max_hoist_speed = 3.32;
+max_swing_accel = 4.2;
+max_hoist_accel = 1.4;
+walking_speed = 4.0;
+
+swell_factor = 1.05; 
+angle_of_repose = 38.0;
+spoil_toe_start_point_x = 77.5;
+spoil_toe_start_point_y = -98.5;
+spoil_toe_end_point_x = -266.5;
+spoil_toe_end_point_y = 259.5;
+
+coal_height = 16.0;
+
+test_dl_seq_path = "/home/haoquan/Documents/DLSimulationCostModel/config/test_dl_seq_3ns27.csv"

@@ -1,0 +1,193 @@
+#include "GeomDumping.h"
+#include <OptDataComputation.h>
+#include <DataOperation.h>
+#include <cmath>
+#include <omp.h>
+#include <sys/time.h>
+
+typedef unsigned long long timestamp_t;
+
+static timestamp_t get_timestamp ()
+{
+  struct timeval now;
+  gettimeofday (&now, NULL);
+  return  now.tv_usec + (timestamp_t)now.tv_sec * 1000000;
+}
+
+sol_dumping GeomMaxDumping(unsigned int index,optdata& optdata_all,point_cloud& dg_elements_ini,point_cloud& dg_elements_target,point_cloud& dp_elements,point_cloud& dl_candidate_pos,
+			   dl_para& dragline_para,blk_para& block_para)
+{
+  sol_dumping sol;
+  optdata optdata_ = optdata_all(index);
+
+  point_cloud tmp_dp_elements(dp_elements);
+  vector<vector<double> > tmp_up(optdata_.dumping_points.front().size(),vector<double>(dp_elements.NumberOfPoints(),0.0));
+  vector<double> tmp_V_dp_seq(optdata_.dumping_points.front().size(),0.0);
+  vector<double> tmp_height_dumping_points(optdata_.dumping_points.front().size(),0.0);
+  //  unsigned int i = 0;
+  //#pragma omp parallel for 
+  for(unsigned int i = 0; i < optdata_.dumping_points.front().size(); i++)
+    {
+      unsigned int inner_iter = optdata_.alpha_1.front()[i].size();
+      tmp_height_dumping_points[i] = optdata_.max_height_dumping_points.front()[i];
+      //      #pragma omp parallel for 
+      for(unsigned int j = 0; j < inner_iter; j++)
+	{
+	  double h_post_max_dumping = optdata_.max_height_dumping_points.front()[i] - tan(block_para.angle_of_repose) * optdata_.d_dumping_points_to_elements.front()[i][optdata_.alpha_1.front()[i][j]];
+	  //if(h_post_max_dumping >= tmp_dp_elements.Z(optdata_.alpha_1.front()[i][j]) && h_post_max_dumping <= optdata_.spoil_shell[optdata_.alpha_1.front()[i][j]])
+	    if(h_post_max_dumping >= tmp_dp_elements.Z(optdata_.alpha_1.front()[i][j]))
+	    {
+	      tmp_up[i][optdata_.alpha_1.front()[i][j]] = h_post_max_dumping - tmp_dp_elements.Z(optdata_.alpha_1.front()[i][j]);
+	      tmp_V_dp_seq[i] += tmp_up[i][optdata_.alpha_1.front()[i][j]];
+	      tmp_dp_elements.AssignZCoordinates(optdata_.alpha_1.front()[i][j],h_post_max_dumping);
+	    }
+	}
+    }
+  
+  for(unsigned int i = 0; i < optdata_.dumping_points.front().size(); i++)
+    {
+      tmp_V_dp_seq[i] *= dp_elements.x_cellsize*dp_elements.y_cellsize;
+    }
+
+  sol.height_dumping_points.push_back(tmp_height_dumping_points);
+  sol.up_seq.push_back(tmp_up);
+  sol.V_dp_seq.push_back(tmp_V_dp_seq);
+
+  return sol;
+}
+
+sol_dumping GeomMaxDumping(double x,double y,optdata& optdata_all,point_cloud& dg_elements_ini,point_cloud& dg_elements_target,point_cloud& dp_elements,point_cloud& dl_candidate_pos,
+			   dl_para& dragline_para,blk_para& block_para)
+{
+  unsigned int index = dl_candidate_pos.IndexAtCoordinates(x,y);
+  return GeomMaxDumping(index,optdata_all,dg_elements_ini,dg_elements_target,dp_elements,dl_candidate_pos,dragline_para,block_para);
+}
+
+
+sol_dumping GeomMaxDumping(vector<unsigned int>& indices,optdata& optdata_all,point_cloud& dg_elements_ini,point_cloud& dg_elements_target,point_cloud& dp_elements,point_cloud& dl_candidate_pos,
+			   dl_para& dragline_para,blk_para& block_para)
+{
+  sol_dumping sol;
+  point_cloud tmp_dp_elements(dp_elements); 
+  for(unsigned int i = 0; i < indices.size(); i++)
+    {
+      sol_dumping tmp_sol = GeomMaxDumping(indices[i],optdata_all,dg_elements_ini,dg_elements_target,tmp_dp_elements,dl_candidate_pos,dragline_para,block_para);
+      sol.up_seq.push_back(tmp_sol.up_seq.front());
+      sol.V_dp_seq.push_back(tmp_sol.V_dp_seq.front());
+      sol.height_dumping_points.push_back(tmp_sol.height_dumping_points.front());
+      tmp_dp_elements.ApplyDumpingActionsInPlace(tmp_sol.up_seq.front());
+    }
+   return sol;
+}
+
+sol_dumping GeomMaxDumping(vector<vector<double> >& xy_dl,optdata& optdata_all,point_cloud& dg_elements_ini,point_cloud& dg_elements_target,point_cloud& dp_elements,point_cloud& dl_candidate_pos,
+			   dl_para& dragline_para,blk_para& block_para)
+{
+  vector<unsigned int> indices(xy_dl.size(),0);
+  for(unsigned int i = 0; i < xy_dl.size(); i++)
+    indices[i] = dl_candidate_pos.IndexAtCoordinates(xy_dl[i][0],xy_dl[i][1]);
+  return GeomMaxDumping(indices,optdata_all,dg_elements_ini,dg_elements_target,dp_elements,dl_candidate_pos,dragline_para,block_para);
+}
+
+sol_dumping GeomDumpGivenVolume(unsigned int index,optdata& optdata_all,point_cloud& dg_elements_ini,point_cloud& dg_elements_target,point_cloud& dp_elements,point_cloud& dl_candidate_pos,
+				dl_para& dragline_para,blk_para& block_para,double V_given,sol_dumping& sol_max) 
+{
+  sol_dumping sol;
+  optdata optdata_ = optdata_all(index);
+  unsigned int num_dp = dp_elements.NumberOfPoints();
+
+  vector<double> tmp_V_dp_seq(optdata_.dumping_points.front().size(),0.0);
+  vector<vector<double> > tmp_up_seq(optdata_.dumping_points.front().size(),vector<double>(num_dp,0.0)); 
+  vector<double> tmp_height_dumping_points(optdata_.dumping_points.front().size(),0.0);
+  if(SafeZero(sol_max.VdpSum() - V_given) < 0)
+    cout << "Not enough spoil room" << endl;
+
+  // determine at which dumping element the dragline finishes dumping
+  double V_dp_sum = 0.0; // volume of material dumped from sol_max_dumping_volume so far
+  double V_dp_term; // volume of material dumped at the last dumping point
+  unsigned int ind_term; // index of the last dumping point
+  for(unsigned int iter = 0; iter < optdata_.dumping_points.front().size(); iter++)
+    {
+      V_dp_sum += sol_max.V_dp_seq.front()[iter];
+      if(SafeZero(V_given - V_dp_sum) <= 0)
+	{
+	  //cout << V_given << " " << V_dp_sum << " " << sol_max.V_dp_seq.front()[iter] << endl;
+	  V_dp_term = SafeZero(V_given - V_dp_sum + sol_max.V_dp_seq.front()[iter]);
+	  tmp_V_dp_seq[iter] = V_dp_term;
+	  ind_term = iter;
+	  break;
+	}
+      else
+	{
+	  tmp_up_seq[iter] = sol_max.up_seq.front()[iter];
+	  tmp_V_dp_seq[iter] = sol_max.V_dp_seq.front()[iter];
+	  tmp_height_dumping_points[iter] = sol_max.height_dumping_points.front()[iter];
+	}
+    }
+
+  if(V_dp_term > dragline_para.V_ca)
+    {
+      point_cloud tmp_dp_elements = dp_elements.ApplyDumpingActions(tmp_up_seq); // temporary dumping elements
+
+      // continuously apply half of the current max dumping height of this terminal dumping point until the dumping volume matches
+      double ub = optdata_.max_height_dumping_points.front()[ind_term];
+      double current_V_dp = sol_max.V_dp_seq.front()[ind_term];
+      double current_max_height_dppt = optdata_.max_height_dumping_points.front()[ind_term];
+      double lb = optdata_.floor_dumping_points.front()[ind_term];
+      
+      if(fabs(current_V_dp-V_dp_term) < dragline_para.V_ca) // check this condition first in case of the sol_max solution satisfies 
+	{
+	  tmp_up_seq[ind_term] = sol_max.up_seq.front()[ind_term];
+	  tmp_height_dumping_points[ind_term] = sol_max.height_dumping_points.front()[ind_term];
+	}
+      else
+	{
+	  while(fabs(current_V_dp-V_dp_term) >= dragline_para.V_ca) // tolerance
+	    {
+	      //cout << V_dp_term << " " << sol_max.V_dp_seq.front()[ind_term] << " " << current_V_dp << " " << ub << " " << lb << " "<< optdata_.max_height_dumping_points.front()[ind_term] << " " << optdata_.floor_dumping_points.front()[ind_term] <<  endl;
+	      if(current_V_dp >= V_dp_term)
+		{
+		  ub = current_max_height_dppt;
+		  current_max_height_dppt = (current_max_height_dppt+lb)/2;
+		}
+	      else
+		{
+		  lb = current_max_height_dppt;
+		  current_max_height_dppt = (current_max_height_dppt+ub)/2;
+		}
+
+	      current_V_dp = 0;
+	      //#pragma omp parallel for reduction(+:current_V_dp)
+	      for(unsigned int j = 0; j < optdata_.alpha_1.front()[ind_term].size(); j++)
+		{
+		  double h_post_max_dumping = current_max_height_dppt - tan(block_para.angle_of_repose) * optdata_.d_dumping_points_to_elements.front()[ind_term][optdata_.alpha_1.front()[ind_term][j]];
+		  //if(h_post_max_dumping >= tmp_dp_elements.Z(optdata_.alpha_1.front()[ind_term][j]) && h_post_max_dumping <= optdata_.spoil_shell[optdata_.alpha_1.front()[ind_term][j]])
+		  if(h_post_max_dumping >= tmp_dp_elements.Z(optdata_.alpha_1.front()[ind_term][j]))
+		    {
+		      tmp_up_seq[ind_term][optdata_.alpha_1.front()[ind_term][j]] = h_post_max_dumping - tmp_dp_elements.Z(optdata_.alpha_1.front()[ind_term][j]);
+		      current_V_dp += tmp_up_seq[ind_term][optdata_.alpha_1.front()[ind_term][j]];
+		    }
+		  else
+		    tmp_up_seq[ind_term][optdata_.alpha_1.front()[ind_term][j]] = 0;
+		}
+      
+	      current_V_dp *= dp_elements.x_cellsize*dp_elements.y_cellsize;
+	      //ut << current_max_height_dppt << endl; 
+	    }
+	  tmp_height_dumping_points[ind_term] = current_max_height_dppt;
+	}
+    }
+  sol.up_seq.push_back(tmp_up_seq);
+  sol.V_dp_seq.push_back(tmp_V_dp_seq);
+  sol.height_dumping_points.push_back(tmp_height_dumping_points);
+  return sol;
+}
+
+
+sol_dumping GeomDumpGivenVolume(double x, double y,optdata& optdata_all,point_cloud& dg_elements_ini,point_cloud& dg_elements_target,point_cloud& dp_elements,point_cloud& dl_candidate_pos,
+				dl_para& dragline_para,blk_para& block_para,double V_given,sol_dumping& sol_max) 
+{
+  unsigned int index = dl_candidate_pos.IndexAtCoordinates(x,y);
+  return GeomDumpGivenVolume(index,optdata_all,dg_elements_ini,dg_elements_target,dp_elements,dl_candidate_pos,dragline_para,block_para,V_given,sol_max); 
+
+}

@@ -1,0 +1,1 @@
+/usr/bin/c++  -fPIC  -fopenmp -Wall -std=c++11   -shared -Wl,-soname,libNecessity.so -o ../libNecessity.so CMakeFiles/Necessity.dir/IO.cpp.o CMakeFiles/Necessity.dir/DataOperation.cpp.o CMakeFiles/Necessity.dir/DataStruct.cpp.o CMakeFiles/Necessity.dir/OptDataComputation.cpp.o CMakeFiles/Necessity.dir/Cost.cpp.o 

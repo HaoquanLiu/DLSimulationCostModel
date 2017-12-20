@@ -1,0 +1,146 @@
+#include <DataStruct.h>
+#include <IO.h>
+#include <Cost.h>
+#include <DataOperation.h>
+#include <OptDataComputation.h>
+#include <GeomDumping.h>
+#include <GeomDigging.h>
+#include <GeomDumpingInRegions.h>
+#include <DiggingMILP.h>
+#include <DumpingMILP.h>
+#include <sys/time.h>
+#include <omp.h>
+#include <algorithm>
+
+using namespace std;
+
+typedef unsigned long long timestamp_t;
+
+static timestamp_t get_timestamp ()
+{
+  struct timeval now;
+  gettimeofday (&now, NULL);
+  return  now.tv_usec + (timestamp_t)now.tv_sec * 1000000;
+}
+
+int main()
+{
+  /***********************  This cost model comparison is performed when the definition of the dumping locations is not constrained by the strip excavation direction.************/
+  /***********************  This cost model comparison is performed when the definition of the dumping locations is not constrained by the strip excavation direction.************/
+  /***********************  This cost model comparison is performed when the definition of the dumping locations is not constrained by the strip excavation direction.************/
+  /***********************  This cost model comparison is performed when the definition of the dumping locations is not constrained by the strip excavation direction.************/
+
+  //--------------------Compute the digging actions from each position first depending the resulting terrain after each position
+  // read the initial terrain and extract the digging and dumping areas
+  point_cloud ini_point_cloud("/home/haoquan/Documents/DLHaoquan/data/11n_new_perPosition_terrain/11n_b1InitialTerrain_2x2.xyz",2.0,2.0);
+  point_cloud target_point_cloud("/home/haoquan/Documents/DLHaoquan/data/11n_designProfile_2x2.xyz",2.0,2.0);
+  vector<vector<double> > dg_polygon = ReadCSV("/home/haoquan/Documents/DLHaoquan/config/dg_polygon_11n_blk1.csv");
+  vector<vector<double> > dl_polygon = ReadCSV("/home/haoquan/Documents/DLHaoquan/config/dl_polygon_11n_blk1.csv");  
+  vector<vector<double> > dp_polygon = ReadCSV("/home/haoquan/Documents/DLHaoquan/config/dp_polygon_11n.csv");
+  point_cloud dg_elements_ini = ini_point_cloud.ExtractPointCloud(dg_polygon);
+  point_cloud dp_elements = ini_point_cloud.ExtractPointCloud(dp_polygon);
+  point_cloud dl_candidate_pos = ini_point_cloud.ExtractPointCloud(dl_polygon);
+  point_cloud dg_elements_target = target_point_cloud.ExtractPointCloud(dg_polygon);
+
+  // compute the optimization data
+  dl_para dragline_para(88.39, 12.24, 3.81, 18, 50, 21, 4, 42.67, 8.95, 3.32, 4.2, 1.4, 4.0); // 11n
+  blk_para block_para(1.05, 38, 117.5, -100.5, -186.5, 129.5); // 11n
+  vector<vector<double> > dl_seq = ReadCSV("/home/haoquan/Documents/DLHaoquan/data/operator_tub_position_11n_blk1.xyz");
+  vector<unsigned int> dl_seq_indices(dl_seq.size(),0);
+  for(unsigned int i = 0; i < dl_seq.size(); i++)
+    dl_seq_indices[i] = dl_candidate_pos.IndexAtCoordinates(dl_seq[i][0],dl_seq[i][1]);
+  vector<vector<unsigned int> > start_dppt_seq_seq = ReadCSVTemp("/home/haoquan/Documents/DLHaoquan/config/start_dppt_seq_operator_11n_blk1.csv");
+  vector<unsigned int> start_dppt_seq = start_dppt_seq_seq.front();
+  vector<vector<double> > V_given_seq = ReadCSV("/home/haoquan/Documents/DLHaoquan/config/V_dug_operator_11n_blk1.csv");
+  vector<double> V_given = V_given_seq.front();
+  optdata optdata_all = ComputeOptData(ini_point_cloud,dl_candidate_pos,dg_elements_ini,dg_elements_target,dp_elements,dragline_para,block_para);
+
+  for(unsigned int i = 0; i < dl_seq.size(); i++)
+    {
+      ofstream ofs_test;
+      ofs_test.open(string("/tmp/dumping_points")+to_string(i)+string(".xyz"));
+      for(unsigned int j = 0; j < optdata_all.dumping_points[dl_seq_indices[i]].size(); j++)
+	ofs_test << optdata_all.dumping_points[dl_seq_indices[i]][j][0] << "," << optdata_all.dumping_points[dl_seq_indices[i]][j][1] << "," << 99 << endl;
+      ofs_test.close();
+    }
+  
+  // initialize the solution
+  sol_digging_dumping sol;
+  sol.ug_seq = vector<vector<double> >(dl_seq.size(),vector<double>(dg_elements_ini.NumberOfPoints(),0.0));
+  sol.height_end_of_fill_points = vector<vector<double> >(dl_seq.size(),vector<double>(dg_elements_ini.NumberOfPoints(),0.0));
+  sol.sa_end_of_fill_points = vector<vector<double> >(dl_seq.size(),vector<double>(dg_elements_ini.NumberOfPoints(),0.0));
+
+  sol.V_dp_seq = vector<vector<double> >(dl_seq.size(),vector<double>());
+  sol.up_seq = vector<vector<vector<double> > >(dl_seq.size(),vector<vector<double> >());
+  sol.height_dumping_points = vector<vector<double> >(dl_seq.size(),vector<double>());
+
+  // main loop, read the resulting terrain after each position in each iteration
+  for(unsigned int i = 0; i < dl_seq.size(); i++)
+    {
+      point_cloud result_point_cloud(string("/home/haoquan/Documents/DLHaoquan/data/11n_new_perPosition_terrain/11n_b1p")+to_string(i+1)+string("Terrain_2x2.xyz"),2.0,2.0);
+      point_cloud dg_elements_result = result_point_cloud.ExtractPointCloud(dg_polygon);
+      point_cloud dp_elements_result = result_point_cloud.ExtractPointCloud(dp_polygon);
+      point_cloud dp_elements_actual(dp_elements);
+
+      // compute the digging action
+      sol.ug_seq[i] = SubtractVector(dg_elements_ini.ZCoordinates(),dg_elements_result.ZCoordinates());
+      unsigned int num_feasible_dg = optdata_all.beta_1[dl_seq_indices[i]].size();
+      vector<unsigned int> ind_feasible_dg = optdata_all.beta_1[dl_seq_indices[i]];
+      for(unsigned int j = 0; j < num_feasible_dg; j++)
+	{
+	  if(sol.ug_seq[i][ind_feasible_dg[j]] != 0.0)
+	    {
+	      // find the indices of the preceding elements
+	      vector<unsigned int> ind_preceding = optdata_all.preceding_elem[dl_seq_indices[i]][ind_feasible_dg[j]];
+	      for(unsigned int k = 0; k < ind_preceding.size(); k++)
+		{
+		  if(sol.ug_seq[i][ind_preceding[k]] != 0.0)
+		    {
+		      if(k > 0)
+			{
+			  sol.sa_end_of_fill_points[i][ind_feasible_dg[j]] = optdata_all.sa_1_nohoist.front()[ind_preceding[k-1]];
+			  sol.height_end_of_fill_points[i][ind_feasible_dg[j]] = dg_elements_ini.Z(ind_preceding[k-1]);
+			}
+		      else
+			{
+			  sol.sa_end_of_fill_points[i][ind_feasible_dg[j]] = optdata_all.sa_1_nohoist.front()[ind_preceding[k]];
+			  sol.height_end_of_fill_points[i][ind_feasible_dg[j]] = dg_elements_ini.Z(ind_preceding[k]);
+			}
+		      break;
+		    }
+		}
+	    }
+	}
+
+      // compute the dumping action
+      // double V_given = SumVector(sol.ug_seq[i])*dg_elements_ini.x_cellsize*dg_elements_ini.y_cellsize;
+      cout << "Volume of material removed from the block based on the actual resulting terrain is " << V_given[i] << "m^3." << endl; 
+      cout << "Volume of material dumped based on the actual resulting terrain is " << 
+	SumVector(SubtractVector(dp_elements_result.ZCoordinates(),dp_elements_actual.ZCoordinates()))*dg_elements_ini.x_cellsize*dg_elements_ini.y_cellsize << "m^3." << endl; 
+      
+      sol_dumping sol_max = GeomMaxDumpingInRegions(dl_seq_indices[i],optdata_all,dg_elements_ini,dg_elements_target,dp_elements,dl_candidate_pos,dragline_para,block_para,start_dppt_seq[i]);
+      sol_dumping sol_actual = GeomDumpGivenVolumeInRegions(dl_seq_indices[i],optdata_all,dg_elements_ini,dg_elements_target,dp_elements,dl_candidate_pos,dragline_para,block_para,
+							    V_given[i]*block_para.swell_factor,sol_max,start_dppt_seq[i]);
+      sol.up_seq[i] = sol_actual.up_seq.front(); // not the same as the actual terrain
+      sol.V_dp_seq[i] = sol_actual.V_dp_seq.front(); // not the same as the actual terrain
+      sol.height_dumping_points[i] = sol_actual.height_dumping_points.front();
+
+
+      dp_elements.ApplyDumpingActionsInPlace(sol.up_seq[i]); // apply the simulated dumping actions to dp_elements
+      dp_elements_actual.AssignZCoordinates(dp_elements_result.ZCoordinates()); // apply the actual dumping actions to dp_elements_actual
+      dg_elements_ini.AssignZCoordinates(dg_elements_result.ZCoordinates());
+      dp_elements.WriteToXYZ(string("/tmp/simulated_dp_elements_")+to_string(i)+string(".xyz"));
+      dg_elements_ini.WriteToXYZ(string("/tmp/simulated_dg_elements_")+to_string(i)+string(".xyz"));
+    }
+
+  // compute the cost
+  dg_elements_ini = ini_point_cloud.ExtractPointCloud(dg_polygon);
+  dp_elements = ini_point_cloud.ExtractPointCloud(dp_polygon);
+  cost_sol cost_online = CostDiggingDumping(sol,dl_seq_indices,optdata_all,dl_candidate_pos,dg_elements_ini,dg_elements_target,dp_elements,dragline_para,block_para);
+  for(unsigned int i = 0; i < dl_seq.size(); i++)
+    cout << cost_online.swing_time[i]*2 << endl;
+  cout << "Total operation time of the positioning sequence is " << cost_online.tot_op_time << "s" << endl;
+
+  cout << "Done." << endl;
+  return 0;
+}

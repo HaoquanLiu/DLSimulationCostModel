@@ -1,0 +1,57 @@
+#ifndef DATAOPERATION_H_
+#define DATAOPERATION_H_
+
+#include <string>
+#include <vector>
+
+using namespace std;
+
+enum {clockwise = 1, anticlockwise = -1}; // define the swing direction in dig-dump cycles
+
+// check whether vector v2 is clockwise/anticloskwise from vector v1 (2D vectors)
+// v[0]: x coordinate, v[1]: y coordinate
+int SwingDir(vector<double>, vector<double>);
+
+// safe version of acos in case of rounding error
+double SafeCos (double);
+
+// prevent negative zeros when computing extraction of two values
+double SafeZero(double);
+
+// prevent negative zeros when computing extraction of two values
+vector<vector<double> > SafeZero(vector<vector<double> >&);
+
+// compute dot product of two vectors
+double Dot(vector<double>&, vector<double>&);
+
+// compute 2-norm of a vector
+double Norm(vector<double>&);
+
+//method to check if a Coordinate is located in a polygon
+bool InPolygon(vector<vector<double> >&,double, double);
+
+// compute the sum of a vector
+double SumVector(const vector<double>&);
+
+// compute the minimum element of a vector
+double MinVector(vector<double>&);
+
+// compute the maximum elment of a vector
+double MaxVector(vector<double>&);
+
+// subtract a vector from another vector
+vector<double> SubtractVector(const vector<double>&,const vector<double>&);
+vector<unsigned int> SubtractVector(const vector<unsigned int>&,const vector<unsigned int>&);
+
+vector<double> SumVector(const vector<double>&,const vector<vector<double> >&);
+vector<double> SumVector(const vector<double>&,const vector<double>&);
+vector<unsigned int> SumVector(const vector<unsigned int>&,const vector<vector<unsigned int> >&);
+
+// translate polygons along a direction 
+void PolyTran(vector<vector<double> >&,vector<double>&, double);
+
+vector<unsigned int> IndicesCoal(vector<double>&,double);
+
+double ExposeRatio(vector<double>&, vector<double>&, vector<unsigned int>&);
+
+#endif /* DATAOPERATION_H_ */
